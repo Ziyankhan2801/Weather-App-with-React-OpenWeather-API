@@ -140,6 +140,52 @@ const getDayName = (timestamp) => {
   );
 };
 
+const getAQIInfo = (aqi) => {
+  switch (aqi) {
+    case 1:
+      return {
+        label: "Good",
+        description: "Air quality is considered satisfactory.",
+        className: "aqi-good",
+      };
+
+    case 2:
+      return {
+        label: "Fair",
+        description: "Air quality is acceptable for most people.",
+        className: "aqi-fair",
+      };
+
+    case 3:
+      return {
+        label: "Moderate",
+        description: "Sensitive people may experience discomfort.",
+        className: "aqi-moderate",
+      };
+
+    case 4:
+      return {
+        label: "Poor",
+        description: "Health effects may be noticed by sensitive groups.",
+        className: "aqi-poor",
+      };
+
+    case 5:
+      return {
+        label: "Very Poor",
+        description: "Health warnings may be needed.",
+        className: "aqi-very-poor",
+      };
+
+    default:
+      return {
+        label: "Unknown",
+        description: "Air quality data is unavailable.",
+        className: "aqi-unknown",
+      };
+  }
+};
+
 const getHour = (dateText) => {
   return new Date(dateText).toLocaleTimeString(
     "en-US",
@@ -183,6 +229,87 @@ export default function Weather() {
       return [];
     }
   });
+
+  const [airQuality, setAirQuality] = useState(null);
+
+
+  // --------------------------------
+// WEATHER ALERT
+// --------------------------------
+
+const getWeatherAlert = () => {
+  if (!weather) return null;
+
+  const condition = weather.weather?.[0]?.main;
+  const description = weather.weather?.[0]?.description;
+  const temp = weather.main?.temp;
+  const windSpeed = weather.wind?.speed;
+
+  if (condition === "Thunderstorm") {
+    return {
+      type: "storm",
+      icon: <CloudLightning size={22} />,
+      title: "Thunderstorm Alert",
+      message: `Thunderstorm conditions detected. Stay indoors and avoid unnecessary travel.`,
+    };
+  }
+
+  if (
+    condition === "Rain" &&
+    description?.toLowerCase().includes("heavy")
+  ) {
+    return {
+      type: "rain",
+      icon: <CloudRain size={22} />,
+      title: "Heavy Rain Alert",
+      message: `Heavy rainfall is currently expected. Carry an umbrella and travel carefully.`,
+    };
+  }
+
+  if (temp >= 40) {
+    return {
+      type: "hot",
+      icon: <Thermometer size={22} />,
+      title: "Extreme Heat Alert",
+      message: `Temperature is ${Math.round(
+        temp
+      )}°C. Stay hydrated and avoid prolonged exposure to the sun.`,
+    };
+  }
+
+  if (temp <= 5) {
+    return {
+      type: "cold",
+      icon: <CloudSnow size={22} />,
+      title: "Low Temperature Alert",
+      message: `Temperature is ${Math.round(
+        temp
+      )}°C. Dress warmly and take care in cold conditions.`,
+    };
+  }
+
+  if (windSpeed >= 15) {
+    return {
+      type: "wind",
+      icon: <Wind size={22} />,
+      title: "Strong Wind Alert",
+      message: `Strong winds are currently being reported. Take extra care outdoors.`,
+    };
+  }
+
+  if (condition === "Snow") {
+    return {
+      type: "snow",
+      icon: <CloudSnow size={22} />,
+      title: "Snow Alert",
+      message: `Snow conditions are currently being reported. Travel carefully.`,
+    };
+  }
+
+  return null;
+};
+
+const weatherAlert = getWeatherAlert();
 
     // --------------------------------
   // CITY AUTOCOMPLETE
@@ -350,6 +477,21 @@ export default function Weather() {
     setForecast(forecastData);
 
     // -----------------------------
+// FETCH AIR QUALITY
+// -----------------------------
+
+const airQualityResponse = await fetch(
+  `https://api.openweathermap.org/data/2.5/air_pollution?lat=${weatherData.coord.lat}&lon=${weatherData.coord.lon}&appid=${API_KEY}`
+);
+
+if (airQualityResponse.ok) {
+  const airQualityData = await airQualityResponse.json();
+  setAirQuality(airQualityData);
+} else {
+  setAirQuality(null);
+}
+
+    // -----------------------------
     // RECENT SEARCH
     // -----------------------------
 
@@ -371,11 +513,29 @@ export default function Weather() {
       return updated;
     });
 
-  } catch (err) {
-    setWeather(null);
-    setForecast(null);
-    setError(err.message);
-  } finally {
+} catch (err) {
+  console.error("Weather error:", err);
+
+  setWeather(null);
+  setForecast(null);
+  setAirQuality(null);
+
+  if (!navigator.onLine) {
+    setError(
+      "You are offline. Please check your internet connection."
+    );
+  } else if (err.name === "TypeError") {
+    setError(
+      "Unable to connect to the weather service. Please try again."
+    );
+  } else {
+    setError(
+      err.message || "Something went wrong. Please try again."
+    );
+  }
+}
+  
+  finally {
     setLoading(false);
   }
 };
@@ -394,78 +554,125 @@ export default function Weather() {
   // --------------------------------
 
   const getCurrentLocation = () => {
-    if (!navigator.geolocation) {
-      setError("Geolocation is not supported by your browser.");
-      return;
-    }
+  if (!navigator.geolocation) {
+    setError("Geolocation is not supported by your browser.");
+    return;
+  }
 
-    setLocationLoading(true);
-    setError("");
+  setLocationLoading(true);
+  setError("");
 
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        const { latitude, longitude } = position.coords;
+  navigator.geolocation.getCurrentPosition(
+    async (position) => {
+      const { latitude, longitude } = position.coords;
 
-        try {
-          const response = await fetch(
-            `https://api.openweathermap.org/data/2.5/weather?lat=${latitude}&lon=${longitude}&appid=${API_KEY}&units=metric`
+      try {
+        const response = await fetch(
+          `https://api.openweathermap.org/data/2.5/weather?lat=${latitude}&lon=${longitude}&appid=${API_KEY}&units=metric`
+        );
+
+        if (!response.ok) {
+          throw new Error("Unable to get weather for your location.");
+        }
+
+        const data = await response.json();
+
+        setWeather(data);
+        setCity(data.name);
+        setLastUpdated(new Date());
+
+        const forecastResponse = await fetch(
+          `https://api.openweathermap.org/data/2.5/forecast?lat=${latitude}&lon=${longitude}&appid=${API_KEY}&units=metric`
+        );
+
+        if (!forecastResponse.ok) {
+          throw new Error(
+            "Current weather loaded, but forecast failed."
+          );
+        }
+
+        const forecastData = await forecastResponse.json();
+
+        setForecast(forecastData);
+
+        // -----------------------------
+        // FETCH AIR QUALITY
+        // -----------------------------
+
+        const airQualityResponse = await fetch(
+          `https://api.openweathermap.org/data/2.5/air_pollution?lat=${latitude}&lon=${longitude}&appid=${API_KEY}`
+        );
+
+        if (airQualityResponse.ok) {
+          const airQualityData = await airQualityResponse.json();
+          setAirQuality(airQualityData);
+        } else {
+          setAirQuality(null);
+        }
+
+        setRecentCities((previous) => {
+          const updated = [
+            data.name,
+            ...previous.filter(
+              (item) =>
+                item.toLowerCase() !== data.name.toLowerCase()
+            ),
+          ].slice(0, 5);
+
+          localStorage.setItem(
+            "recentCities",
+            JSON.stringify(updated)
           );
 
-          if (!response.ok) {
-            throw new Error("Unable to get weather for your location.");
-          }
+          return updated;
+        });
 
-          const data = await response.json();
-
-          setWeather(data);
-          setCity(data.name);
-          setLastUpdated(new Date());
-
-          const forecastResponse = await fetch(
-  `https://api.openweathermap.org/data/2.5/forecast?lat=${latitude}&lon=${longitude}&appid=${API_KEY}&units=metric`
-);
-
-if (!forecastResponse.ok) {
-  throw new Error(
-    "Current weather loaded, but forecast failed."
-  );
-}
-
-const forecastData =
-  await forecastResponse.json();
-
-setForecast(forecastData);
-
-          setRecentCities((previous) => {
-            const updated = [
-              data.name,
-              ...previous.filter(
-                (item) =>
-                  item.toLowerCase() !== data.name.toLowerCase()
-              ),
-            ].slice(0, 5);
-
-            localStorage.setItem(
-              "recentCities",
-              JSON.stringify(updated)
-            );
-
-            return updated;
-          });
-        } catch (err) {
-          setError(err.message);
-        } finally {
-          setLocationLoading(false);
-        }
-      },
-      () => {
-        setLocationLoading(false);
+      } catch (err) {
         setError(
-          "Location permission denied. Please allow location access."
+          err.message ||
+          "Unable to load weather for your location."
         );
+      } finally {
+        setLocationLoading(false);
       }
-    );
-  };
+    },
+
+    (error) => {
+      setLocationLoading(false);
+
+      switch (error.code) {
+        case error.PERMISSION_DENIED:
+          setError(
+            "Location permission was denied. Please allow location access and try again."
+          );
+          break;
+
+        case error.POSITION_UNAVAILABLE:
+          setError(
+            "Your location could not be detected. Please check your device location settings."
+          );
+          break;
+
+        case error.TIMEOUT:
+          setError(
+            "Location request timed out. Please try again."
+          );
+          break;
+
+        default:
+          setError(
+            "Unable to determine your location. Please try again."
+          );
+      }
+    },
+
+    {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 300000,
+    }
+  );
+};
 
   // --------------------------------
   // DELETE RECENT CITY
@@ -733,10 +940,30 @@ setForecast(forecastData);
             {/* ERROR */}
 
             {error && (
-              <div className="error-message">
-                {error}
-              </div>
-            )}
+  <div className="error-message" role="alert">
+
+    <div className="error-content">
+      <strong>Unable to load weather</strong>
+      <span>{error}</span>
+    </div>
+
+    <button
+      type="button"
+      className="error-retry-button"
+      onClick={() => {
+        if (city.trim()) {
+          fetchWeather(city);
+        } else {
+          getCurrentLocation();
+        }
+      }}
+    >
+      <RefreshCw size={15} />
+      Retry
+    </button>
+
+  </div>
+)}
 
             {/* RECENT SEARCHES */}
 
@@ -788,33 +1015,97 @@ setForecast(forecastData);
 
             {/* FAVORITE CITIES */}
 
-            {favorites.length > 0 && (
-              <div className="favorites-section">
-                <div className="recent-header">
-                  <span>
-                    <Heart size={15} fill="currentColor" />
-                    Favorite cities
-                  </span>
-                </div>
+{favorites.length > 0 && (
+  <div className="favorites-section">
 
-                <div className="favorite-list">
-                  {favorites.map((favoriteCity) => (
-                    <button
-                      className="favorite-city"
-                      key={favoriteCity}
-                      onClick={() => {
-                        setCity(favoriteCity);
-                        fetchWeather(favoriteCity);
-                      }}
-                    >
-                      <MapPin size={15} />
-                      <span>{favoriteCity}</span>
-                      <Heart size={14} fill="currentColor" />
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
+    <div className="recent-header">
+      <span>
+        <Heart size={15} fill="currentColor" />
+        Favorite cities
+      </span>
+
+      <small>
+        {favorites.length}/10
+      </small>
+    </div>
+
+    <div className="favorite-list">
+
+      {favorites.map((favoriteCity) => (
+        <div
+          className="favorite-city-card"
+          key={favoriteCity}
+        >
+
+          {/* OPEN CITY */}
+
+          <button
+            type="button"
+            className="favorite-city-main"
+            onClick={() => {
+              setCity(favoriteCity);
+              fetchWeather(favoriteCity);
+            }}
+          >
+
+            <div className="favorite-city-icon">
+              <MapPin size={18} />
+            </div>
+
+            <div className="favorite-city-info">
+
+              <strong>
+                {favoriteCity}
+              </strong>
+
+              <span>
+                Click to view weather
+              </span>
+
+            </div>
+
+          </button>
+
+
+          {/* REMOVE */}
+
+          <button
+            type="button"
+            className="favorite-remove"
+            onClick={() => {
+
+              setFavorites((previous) => {
+
+                const updated = previous.filter(
+                  (item) =>
+                    item.toLowerCase() !==
+                    favoriteCity.toLowerCase()
+                );
+
+                localStorage.setItem(
+                  "favoriteCities",
+                  JSON.stringify(updated)
+                );
+
+                return updated;
+              });
+
+            }}
+            title={`Remove ${favoriteCity} from favorites`}
+            aria-label={`Remove ${favoriteCity} from favorites`}
+          >
+
+            <Trash2 size={16} />
+
+          </button>
+
+        </div>
+      ))}
+
+    </div>
+
+  </div>
+)}
 
             {/* LOADING STATE */}
 
@@ -823,13 +1114,33 @@ setForecast(forecastData);
                 <LoaderCircle size={38} className="loading-spinner" />
                 <strong>Getting latest weather...</strong>
                 <span>Please wait a moment</span>
-              </div>
+              </div>        
             )}
 
             {/* WEATHER */}
 
             {weather && (
               <section className="weather-result">
+                    
+                {weatherAlert && (
+  <div className={`weather-alert ${weatherAlert.type}`}>
+
+    <div className="weather-alert-icon">
+      {weatherAlert.icon}
+    </div>
+
+    <div className="weather-alert-content">
+      <strong>
+        {weatherAlert.title}
+      </strong>
+
+      <p>
+        {weatherAlert.message}
+      </p>
+    </div>
+
+  </div>
+)}
 
                 {/* LOCATION */}
 
@@ -964,9 +1275,13 @@ setForecast(forecastData);
                             {getForecastIcon(item.weather[0].main, 30)}
                           </div>
                           <strong>{getTemperature(item.main.temp, unit)}°</strong>
-                          <span className="hour-rain">
-                            {Math.round((item.pop || 0) * 100)}% rain
-                          </span>
+                    <div className="rain-probability">
+                      <Droplets size={12} />
+
+                      <span>
+                       {Math.round((item.pop || 0) * 100)}%
+                      </span>
+                    </div>
                         </div>
                       ))}
                     </div>
@@ -1091,43 +1406,243 @@ setForecast(forecastData);
 
                   </div>
 
+                  <div className="detail-card precipitation-card">
+
+  <Droplets size={22} />
+
+  <span>Rain Chance</span>
+
+  <strong>
+    {hourlyForecast.length > 0
+      ? Math.round(
+          Math.max(
+            ...hourlyForecast.map(
+              (item) => (item.pop || 0) * 100
+            )
+          )
+        )
+      : 0}
+    %
+  </strong>
+
+</div>
+
                 </div>
+
+                {/* AIR QUALITY */}
+
+{airQuality?.list?.[0] && (
+  <section className="air-quality-card">
+
+    <div className="air-quality-header">
+
+      <div>
+        <span className="air-quality-label">
+          AIR QUALITY
+        </span>
+
+        <h3>
+          Air Quality Index
+        </h3>
+      </div>
+
+      <div
+        className={`aqi-badge ${
+          getAQIInfo(
+            airQuality.list[0].main.aqi
+          ).className
+        }`}
+      >
+        {getAQIInfo(
+          airQuality.list[0].main.aqi
+        ).label}
+      </div>
+
+    </div>
+
+
+    <div className="aqi-main">
+
+      <div
+        className={`aqi-number ${
+          getAQIInfo(
+            airQuality.list[0].main.aqi
+          ).className
+        }`}
+      >
+        {airQuality.list[0].main.aqi}
+      </div>
+
+      <div className="aqi-description">
+
+        <strong>
+          {getAQIInfo(
+            airQuality.list[0].main.aqi
+          ).label} air quality
+        </strong>
+
+        <span>
+          {getAQIInfo(
+            airQuality.list[0].main.aqi
+          ).description}
+        </span>
+
+      </div>
+
+    </div>
+
+
+    <div className="pollutant-grid">
+
+      <div className="pollutant-item">
+        <span>PM2.5</span>
+        <strong>
+          {airQuality.list[0].components.pm2_5.toFixed(1)}
+        </strong>
+        <small>μg/m³</small>
+      </div>
+
+      <div className="pollutant-item">
+        <span>PM10</span>
+        <strong>
+          {airQuality.list[0].components.pm10.toFixed(1)}
+        </strong>
+        <small>μg/m³</small>
+      </div>
+
+      <div className="pollutant-item">
+        <span>NO₂</span>
+        <strong>
+          {airQuality.list[0].components.no2.toFixed(1)}
+        </strong>
+        <small>μg/m³</small>
+      </div>
+
+      <div className="pollutant-item">
+        <span>CO</span>
+        <strong>
+          {airQuality.list[0].components.co.toFixed(1)}
+        </strong>
+        <small>μg/m³</small>
+      </div>
+
+    </div>
+
+  </section>
+)}
 
                 {/* SUN */}
 
-                <div className="sun-times">
+                {/* SUN CYCLE */}
 
-                  <div>
+<div className="sun-cycle-card">
 
-                    <Sunrise size={24} />
+  <div className="sun-cycle-header">
 
-                    <span>Sunrise</span>
+    <div>
+      <span className="sun-cycle-label">
+        DAYLIGHT
+      </span>
 
-                    <strong>
-                      {formatTime(
-                        weather.sys.sunrise,
-                        weather.timezone
-                      )}
-                    </strong>
+      <h3>
+        Sun cycle
+      </h3>
+    </div>
 
-                  </div>
+    <div className="sun-cycle-icon">
+      <Sun size={22} />
+    </div>
 
-                  <div>
+  </div>
 
-                    <Sunset size={24} />
 
-                    <span>Sunset</span>
+  <div className="sun-cycle-visual">
 
-                    <strong>
-                      {formatTime(
-                        weather.sys.sunset,
-                        weather.timezone
-                      )}
-                    </strong>
+    <div className="sun-arc">
 
-                  </div>
+      <div className="sun-orbit" />
 
-                </div>
+      <div className="sun-position">
+        <Sun size={18} />
+      </div>
+
+    </div>
+
+
+    <div className="sun-cycle-times">
+
+      <div className="sun-time sunrise-time">
+
+        <Sunrise size={18} />
+
+        <div>
+          <span>
+            Sunrise
+          </span>
+
+          <strong>
+            {weather
+              ? formatTime(
+                  weather.sys.sunrise,
+                  weather.timezone
+                )
+              : "--"}
+          </strong>
+        </div>
+
+      </div>
+
+
+      <div className="sun-time sunset-time">
+
+        <Sunset size={18} />
+
+        <div>
+          <span>
+            Sunset
+          </span>
+
+          <strong>
+            {weather
+              ? formatTime(
+                  weather.sys.sunset,
+                  weather.timezone
+                )
+              : "--"}
+          </strong>
+        </div>
+
+      </div>
+
+    </div>
+
+  </div>
+
+
+  <div className="daylight-status">
+
+    <Moon size={14} />
+
+    <span>
+      Daylight cycle
+    </span>
+
+    <strong>
+      {weather
+        ? `${Math.max(
+            0,
+            Math.round(
+              (weather.sys.sunset -
+                weather.sys.sunrise) /
+                3600
+            )
+          )}h daylight`
+        : "--"}
+    </strong>
+
+  </div>
+
+</div>
 
               </section>
             )}
